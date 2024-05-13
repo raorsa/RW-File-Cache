@@ -13,8 +13,8 @@ class RWFileCache
      */
     protected $config = [
         'unixLoadUpperThreshold' => 4.0,
-        'gzipCompression'        => true,
-        'cacheDirectory'         => '/tmp/rwFileCacheStorage/',
+        'gzipCompression' => true,
+        'cacheDirectory' => '/tmp/rwFileCacheStorage/',
         /*"garbageCollection" => [
             "chanceToRun" => 0.05,
             "maxAgeSeconds" => 2678400
@@ -45,7 +45,7 @@ class RWFileCache
      *
      * @param mixed $key
      * @param mixed $content
-     * @param int   $expiry
+     * @param int $expiry
      *
      * @return bool
      */
@@ -89,14 +89,8 @@ class RWFileCache
         return $result ? true : false;
     }
 
-    /**
-     * Returns a value from the cache.
-     *
-     * @param string $key
-     *
-     * @return mixed
-     */
-    public function get($key)
+
+    public function getObject($key)
     {
         $filePath = $this->getFilePathFromKey($key);
 
@@ -114,7 +108,20 @@ class RWFileCache
             $cacheFileData = gzuncompress($cacheFileData);
         }
 
-        $cacheObj = json_decode($cacheFileData);
+        return json_decode($cacheFileData);
+    }
+
+
+    /**
+     * Returns a value from the cache.
+     *
+     * @param string $key
+     *
+     * @return mixed
+     */
+    public function get($key)
+    {
+        $cacheObj = $this->getObject($key);
 
         // Unable to decode JSON (could happen if compression was turned off while compressed caches still exist)
         if ($cacheObj === null) {
@@ -194,7 +201,7 @@ class RWFileCache
                 continue;
             }
 
-            $fullFilePath = $directory.'/'.$filePath;
+            $fullFilePath = $directory . '/' . $filePath;
             if (is_dir($fullFilePath)) {
                 $result = $this->deleteDirectoryTree($fullFilePath);
                 if ($result) {
@@ -219,7 +226,7 @@ class RWFileCache
      * Increments a value within the cache.
      *
      * @param string $key
-     * @param int    $offset
+     * @param int $offset
      *
      * @return bool
      */
@@ -261,7 +268,7 @@ class RWFileCache
      * Decrements a value within the cache.
      *
      * @param string $key
-     * @param int    $offset
+     * @param int $offset
      *
      * @return bool
      */
@@ -274,8 +281,8 @@ class RWFileCache
      * Replaces a value within the cache.
      *
      * @param string $key
-     * @param mixed  $content
-     * @param int    $expiry
+     * @param mixed $content
+     * @param int $expiry
      *
      * @return bool
      */
@@ -309,7 +316,7 @@ class RWFileCache
         $endOfDirectory = strrpos($key, '/');
 
         if ($endOfDirectory !== false) {
-            $directoryToCreate = $this->config['cacheDirectory'].substr($key, 0, $endOfDirectory);
+            $directoryToCreate = $this->config['cacheDirectory'] . substr($key, 0, $endOfDirectory);
         }
 
         if (!file_exists($directoryToCreate)) {
@@ -319,7 +326,7 @@ class RWFileCache
             }
         }
 
-        $filePath = $this->config['cacheDirectory'].$key.'.'.$this->config['fileExtension'];
+        $filePath = $this->config['cacheDirectory'] . $key . '.' . $this->config['fileExtension'];
 
         return $filePath;
     }
