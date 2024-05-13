@@ -158,6 +158,26 @@ class RWFileCache
     }
 
     /**
+     * Returns a value from the cache.
+     *
+     * @param string $key
+     *
+     * @return mixed
+     */
+    public function getLast($key)
+    {
+        $cacheObj = $this->getObject($key);
+
+        // Unable to decode JSON (could happen if compression was turned off while compressed caches still exist)
+        if ($cacheObj === null) {
+            return false;
+        } else {
+            return $cacheObj->content;
+        }
+
+    }
+
+    /**
      * Remove a value from the cache.
      *
      * @param string $key
