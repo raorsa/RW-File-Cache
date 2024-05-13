@@ -1,6 +1,6 @@
 <?php
 
-namespace rapidweb\RWFileCache;
+namespace Raorsa\RWFileCache;
 
 use Exception;
 
