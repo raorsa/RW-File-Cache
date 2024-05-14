@@ -138,7 +138,7 @@ class RWFileCache
             $unixLoad = sys_getloadavg();
         }
 
-        if (is_int($cacheObj->expiryTimestamp) && ($cacheObj->expiryTimestamp > time() || $unixLoad[0] >= $this->config['unixLoadUpperThreshold'])) {
+        if (isset($cacheObj->expiryTimestamp) && ($cacheObj->expiryTimestamp > time() || $unixLoad[0] >= $this->config['unixLoadUpperThreshold'])) {
             // Cache item has not yet expired or system load is too high
             $content = $cacheObj->content;
 
