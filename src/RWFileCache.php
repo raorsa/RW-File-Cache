@@ -169,7 +169,7 @@ class RWFileCache
         $cacheObj = $this->getObject($key);
 
         // Unable to decode JSON (could happen if compression was turned off while compressed caches still exist)
-        if ($cacheObj === null) {
+        if ($cacheObj === null || !isset($cacheObj->content)) {
             return false;
         } else {
             return $cacheObj->content;
