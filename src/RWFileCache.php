@@ -12,13 +12,8 @@ class RWFileCache
      * @var string[]
      */
     protected $config = [
-        'unixLoadUpperThreshold' => 4.0,
         'gzipCompression' => true,
         'cacheDirectory' => '/tmp/rwFileCacheStorage/',
-        /*"garbageCollection" => [
-            "chanceToRun" => 0.05,
-            "maxAgeSeconds" => 2678400
-        ],*/
         'fileExtension' => 'cache',
     ];
 
@@ -59,40 +54,38 @@ class RWFileCache
 
         $cacheObj->content = $content;
 
-        if (!$expiry) {
-            // If no expiry specified, set to 'Never' expire timestamp (+10 years)
-            $cacheObj->expiryTimestamp = time() + 315360000;
-        } elseif ($expiry > 2592000) {
-            // For value greater than 30 days, interpret as timestamp
-            $cacheObj->expiryTimestamp = $expiry;
-        } else {
-            // Else, interpret as number of seconds
-            $cacheObj->expiryTimestamp = time() + $expiry;
-        }
+        $cacheObj->expiryTimestamp = $this->set_expiry($expiry);
 
-        // Do not save if cache has already expired
         if ($cacheObj->expiryTimestamp < time()) {
-            $this->delete($key);
+            $result = false;
+        } else {
+            $cacheFileData = json_encode($cacheObj);
 
-            return false;
+            if ($this->config['gzipCompression']) {
+                $cacheFileData = gzencode($cacheFileData, 9);
+            }
+
+            $filePath = $this->getFilePathFromKey($key);
+            $result = file_put_contents($filePath, $cacheFileData);
         }
-
-        $cacheFileData = json_encode($cacheObj);
-
-        if ($this->config['gzipCompression']) {
-            $cacheFileData = gzcompress($cacheFileData);
-        }
-
-        $filePath = $this->getFilePathFromKey($key);
-        $result = file_put_contents($filePath, $cacheFileData);
 
         return $result ? true : false;
     }
 
-
-    public function getObject($key)
+    private function is_gzip($data)
     {
-        $filePath = $this->getFilePathFromKey($key);
+        return 0 === mb_strpos($data, "\x1f" . "\x8b" . "\x08", 0, "US-ASCII");
+    }
+
+
+    public function getObject($key, $absolute = false)
+    {
+        if ($absolute) {
+            $filePath = $key;
+        } else {
+            $filePath = $this->getFilePathFromKey($key);
+        }
+
 
         if (!file_exists($filePath)) {
             return false;
@@ -104,8 +97,8 @@ class RWFileCache
 
         $cacheFileData = file_get_contents($filePath);
 
-        if ($this->config['gzipCompression']) {
-            $cacheFileData = gzuncompress($cacheFileData);
+        if ($this->is_gzip($cacheFileData)) {
+            $cacheFileData = gzdecode($cacheFileData);
         }
 
         return json_decode($cacheFileData);
@@ -128,17 +121,8 @@ class RWFileCache
             return false;
         }
 
-        if (!function_exists('sys_getloadavg')) {
-            throw new Exception('Your PHP installation does not support `sys_getloadavg` (Windows?). Please set `unixLoadUpperThreshold` to `-1` in your RWFileCache config.');
-        }
 
-        if ($this->config['unixLoadUpperThreshold'] == -1) {
-            $unixLoad = [0 => PHP_INT_MAX, 1 => PHP_INT_MAX, 2 => PHP_INT_MAX];
-        } else {
-            $unixLoad = sys_getloadavg();
-        }
-
-        if (isset($cacheObj->expiryTimestamp) && ($cacheObj->expiryTimestamp > time() || $unixLoad[0] >= $this->config['unixLoadUpperThreshold'])) {
+        if (isset($cacheObj->expiryTimestamp) && $cacheObj->expiryTimestamp > time()) {
             // Cache item has not yet expired or system load is too high
             $content = $cacheObj->content;
 
@@ -205,6 +189,19 @@ class RWFileCache
         return $this->deleteDirectoryTree($this->config['cacheDirectory']);
     }
 
+    public function clean()
+    {
+        foreach ($this->directoryTree($this->config['cacheDirectory']) as $file) {
+            if (!is_dir($file)) {
+                $object = $this->getObject($file, true);
+                if ($object->expiryTimestamp < time()) {
+                    unlink($file);
+                }
+            }
+        }
+    }
+
+
     /**
      * Removes cache files from a given directory.
      *
@@ -242,60 +239,26 @@ class RWFileCache
         return true;
     }
 
-    /**
-     * Increments a value within the cache.
-     *
-     * @param string $key
-     * @param int $offset
-     *
-     * @return bool
-     */
-    public function increment($key, $offset = 1)
+    private function directoryTree($directory)
     {
-        $filePath = $this->getFilePathFromKey($key);
+        $files = [];
+        $filePaths = scandir($directory);
 
-        if (!file_exists($filePath)) {
-            return false;
+        foreach ($filePaths as $filePath) {
+            if ($filePath == '.' || $filePath == '..') {
+                continue;
+            }
+
+            $fullFilePath = $directory . '/' . $filePath;
+            if (is_dir($fullFilePath)) {
+                array_merge($files, $this->directoryTree($fullFilePath));
+            }
+            $files[] = $fullFilePath;
         }
 
-        if (!is_readable($filePath)) {
-            return false;
-        }
-
-        $cacheFileData = file_get_contents($filePath);
-
-        if ($this->config['gzipCompression']) {
-            $cacheFileData = gzuncompress($cacheFileData);
-        }
-
-        $cacheObj = json_decode($cacheFileData);
-        $content = $cacheObj->content;
-
-        if ($unserializedContent = @unserialize($content)) {
-            $content = $unserializedContent;
-        }
-
-        if (!$content || !is_numeric($content)) {
-            return false;
-        }
-
-        $content += $offset;
-
-        return $this->set($key, $content, $cacheObj->expiryTimestamp);
+        return $files;
     }
 
-    /**
-     * Decrements a value within the cache.
-     *
-     * @param string $key
-     * @param int $offset
-     *
-     * @return bool
-     */
-    public function decrement($key, $offset = 1)
-    {
-        return $this->increment($key, -$offset);
-    }
 
     /**
      * Replaces a value within the cache.
@@ -349,5 +312,42 @@ class RWFileCache
         $filePath = $this->config['cacheDirectory'] . $key . '.' . $this->config['fileExtension'];
 
         return $filePath;
+    }
+
+    /**
+     * @param $expiry
+     * @return void
+     */
+    private function set_expiry($expiry)
+    {
+        if (!$expiry) {
+            // If no expiry specified, set to 'Never' expire timestamp (+10 years)
+            return (time() + 315360000);
+        } elseif ($expiry > 2592000) {
+            // For value greater than 30 days, interpret as timestamp
+            return $expiry;
+        } else {
+            // Else, interpret as number of seconds
+            return (time() + $expiry);
+        }
+    }
+
+    public static function store($key, $data, $expire = 0, $config = null)
+    {
+        $self = new self();
+        if (!is_null($config)) {
+            $self->changeConfig($config);
+        }
+        return $self->set($key, $data, $expire);
+    }
+
+    public static function read($key, $config = null)
+    {
+        $self = new self();
+        if (!is_null($config)) {
+            $self->changeConfig($config);
+        }
+
+        return $self->get($key);
     }
 }

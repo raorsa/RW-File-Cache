@@ -1,15 +1,22 @@
 <?php
 
 use PHPUnit\Framework\TestCase;
+use Raorsa\RWFileCache\RWFileCache;
 
 final class CacheStorageAndRetrievalTest extends TestCase
 {
     private $cache = null;
 
-    public function setUp()
+    public function setUp(): void
     {
-        $this->cache = new \rapidweb\RWFileCache\RWFileCache();
-        $this->cache->changeConfig(['cacheDirectory' => __DIR__.'/Data/']);
+        $this->cache = new RWFileCache();
+        $this->cache->changeConfig(['cacheDirectory' => __DIR__ . '/Data/']);
+    }
+
+    public function tearDown(): void
+    {
+        $this->cache->flush();
+        unset($this->cache);
     }
 
     public function testBasicString()
