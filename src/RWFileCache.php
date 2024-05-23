@@ -2,7 +2,8 @@
 
 namespace Raorsa\RWFileCache;
 
-use Exception;
+use JsonException;
+use stdClass;
 
 class RWFileCache
 {
@@ -11,7 +12,7 @@ class RWFileCache
      *
      * @var string[]
      */
-    protected $config = [
+    protected array $config = [
         'gzipCompression' => true,
         'cacheDirectory' => '/tmp/rwFileCacheStorage/',
         'fileExtension' => 'cache',
@@ -20,13 +21,13 @@ class RWFileCache
     /**
      * Change the configuration values.
      *
-     * @param array $configArray
+     * @param array $config
      *
      * @return bool
      */
-    public function changeConfig($config)
+    public function changeConfig(array $config): bool
     {
-        if (!is_array($config)) {
+        if (count(array_diff(array_keys($config), array_keys($this->config))) > 0) {
             return false;
         }
 
@@ -44,9 +45,9 @@ class RWFileCache
      *
      * @return bool
      */
-    public function set($key, $content, $expiry = 0)
+    public function set(string $key, mixed $content, int $expiry = 0): bool
     {
-        $cacheObj = new \stdClass();
+        $cacheObj = new stdClass();
 
         if (!is_string($content)) {
             $content = serialize($content);
@@ -59,7 +60,12 @@ class RWFileCache
         if ($cacheObj->expiryTimestamp < time()) {
             $result = false;
         } else {
-            $cacheFileData = json_encode($cacheObj);
+            try {
+                $cacheFileData = json_encode($cacheObj, JSON_THROW_ON_ERROR);
+            } catch (JSONException) {
+                $cacheFileData = false;
+            }
+
 
             if ($this->config['gzipCompression']) {
                 $cacheFileData = gzencode($cacheFileData, 9);
@@ -69,16 +75,15 @@ class RWFileCache
             $result = file_put_contents($filePath, $cacheFileData);
         }
 
-        return $result ? true : false;
+        return (bool)$result;
     }
 
-    private function is_gzip($data)
+    private function is_gzip($data): bool
     {
         return 0 === mb_strpos($data, "\x1f" . "\x8b" . "\x08", 0, "US-ASCII");
     }
 
-
-    public function getObject($key, $absolute = false)
+    public function getObject(string $key, bool $absolute = false): object|false
     {
         if ($absolute) {
             $filePath = $key;
@@ -100,10 +105,12 @@ class RWFileCache
         if ($this->is_gzip($cacheFileData)) {
             $cacheFileData = gzdecode($cacheFileData);
         }
-
-        return json_decode($cacheFileData);
+        try {
+            return json_decode($cacheFileData, false, 512, JSON_THROW_ON_ERROR);
+        } catch (JSONException) {
+            return false;
+        }
     }
-
 
     /**
      * Returns a value from the cache.
@@ -112,33 +119,24 @@ class RWFileCache
      *
      * @return mixed
      */
-    public function get($key)
+    public function get(string $key): mixed
     {
         $cacheObj = $this->getObject($key);
 
-        // Unable to decode JSON (could happen if compression was turned off while compressed caches still exist)
-        if ($cacheObj === null) {
+        if (!isset($cacheObj->expiryTimestamp) || $cacheObj->expiryTimestamp < time()) {
             return false;
         }
 
+        $content = $cacheObj->content;
 
-        if (isset($cacheObj->expiryTimestamp) && $cacheObj->expiryTimestamp > time()) {
-            // Cache item has not yet expired or system load is too high
-            $content = $cacheObj->content;
-
-            if (($unserializedContent = @unserialize($content)) !== false) {
-                // Normal unserialization
-                $content = $unserializedContent;
-            } elseif ($content == serialize(false)) {
-                // Edge case to handle boolean false being stored
+        if (($objectContent = @unserialize($content, [true])) !== false) {
+            $content = $objectContent;
+        } elseif ($content === serialize(false)) {
                 $content = false;
             }
 
-            return $content;
-        } else {
-            // Cache item has expired
-            return false;
-        }
+        return $content;
+
     }
 
     /**
@@ -148,16 +146,12 @@ class RWFileCache
      *
      * @return mixed
      */
-    public function getLast($key)
+    public function getLast(string $key): mixed
     {
         $cacheObj = $this->getObject($key);
 
         // Unable to decode JSON (could happen if compression was turned off while compressed caches still exist)
-        if ($cacheObj === null || !isset($cacheObj->content)) {
-            return false;
-        } else {
-            return $cacheObj->content;
-        }
+        return $cacheObj->content ?? false;
 
     }
 
@@ -168,7 +162,7 @@ class RWFileCache
      *
      * @return bool
      */
-    public function delete($key)
+    public function delete(string $key): bool
     {
         $filePath = $this->getFilePathFromKey($key);
 
@@ -184,12 +178,12 @@ class RWFileCache
      *
      * @return bool
      */
-    public function flush()
+    public function flush(): bool
     {
         return $this->deleteDirectoryTree($this->config['cacheDirectory']);
     }
 
-    public function clean()
+    public function clean(): void
     {
         foreach ($this->directoryTree($this->config['cacheDirectory']) as $file) {
             if (!is_dir($file)) {
@@ -201,7 +195,6 @@ class RWFileCache
         }
     }
 
-
     /**
      * Removes cache files from a given directory.
      *
@@ -209,12 +202,12 @@ class RWFileCache
      *
      * @return bool
      */
-    private function deleteDirectoryTree($directory)
+    private function deleteDirectoryTree(string $directory): bool
     {
         $filePaths = scandir($directory);
 
         foreach ($filePaths as $filePath) {
-            if ($filePath == '.' || $filePath == '..') {
+            if ($filePath === '.' || $filePath === '..') {
                 continue;
             }
 
@@ -225,7 +218,7 @@ class RWFileCache
                     $result = rmdir($fullFilePath);
                 }
             } else {
-                if (basename($fullFilePath) == '.keep') {
+                if (basename($fullFilePath) === '.keep') {
                     continue;
                 }
                 $result = unlink($fullFilePath);
@@ -239,13 +232,13 @@ class RWFileCache
         return true;
     }
 
-    private function directoryTree($directory)
+    private function directoryTree(string $directory): array
     {
         $files = [];
         $filePaths = scandir($directory);
 
         foreach ($filePaths as $filePath) {
-            if ($filePath == '.' || $filePath == '..') {
+            if ($filePath === '.' || $filePath === '..') {
                 continue;
             }
 
@@ -259,7 +252,6 @@ class RWFileCache
         return $files;
     }
 
-
     /**
      * Replaces a value within the cache.
      *
@@ -269,7 +261,7 @@ class RWFileCache
      *
      * @return bool
      */
-    public function replace($key, $content, $expiry = 0)
+    public function replace(string $key, mixed $content, int $expiry = 0): bool
     {
         if (!$this->get($key)) {
             return false;
@@ -283,14 +275,14 @@ class RWFileCache
      *
      * @param string $key
      *
-     * @return string
+     * @return string|bool
      */
-    protected function getFilePathFromKey($key)
+    protected function getFilePathFromKey(string $key): string|bool
     {
         $key = basename($key);
         $badChars = ['-', '.', '_', '\\', '*', '\"', '?', '[', ']', ':', ';', '|', '=', ','];
         $key = str_replace($badChars, '/', $key);
-        while (strpos($key, '//') !== false) {
+        while (str_contains($key, '//')) {
             $key = str_replace('//', '/', $key);
         }
 
@@ -309,30 +301,24 @@ class RWFileCache
             }
         }
 
-        $filePath = $this->config['cacheDirectory'] . $key . '.' . $this->config['fileExtension'];
-
-        return $filePath;
+        return $this->config['cacheDirectory'] . $key . '.' . $this->config['fileExtension'];
     }
 
     /**
-     * @param $expiry
-     * @return void
+     * @param int $expiry
+     * @return int
      */
-    private function set_expiry($expiry)
+    private function set_expiry(int $expiry): int
     {
         if (!$expiry) {
             // If no expiry specified, set to 'Never' expire timestamp (+10 years)
             return (time() + 315360000);
-        } elseif ($expiry > 2592000) {
-            // For value greater than 30 days, interpret as timestamp
-            return $expiry;
-        } else {
-            // Else, interpret as number of seconds
-            return (time() + $expiry);
         }
+
+        return ($expiry > 2592000) ? $expiry : time() + $expiry;
     }
 
-    public static function store($key, $data, $expire = 0, $config = null)
+    public static function store(string $key, mixed $data, int $expire = 0, array $config = null): bool
     {
         $self = new self();
         if (!is_null($config)) {
@@ -341,7 +327,7 @@ class RWFileCache
         return $self->set($key, $data, $expire);
     }
 
-    public static function read($key, $config = null)
+    public static function read(string $key, array $config = null): mixed
     {
         $self = new self();
         if (!is_null($config)) {

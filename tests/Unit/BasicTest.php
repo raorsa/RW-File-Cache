@@ -41,7 +41,7 @@ final class BasicTest extends TestCase
 
     public function testSettingInvalidCacheConfig()
     {
-        $this->assertFalse($this->cache->changeConfig('invalid_data'));
+        $this->assertFalse($this->cache->changeConfig(['invalid_data' => 0]));
     }
 
     public function testDelete()
